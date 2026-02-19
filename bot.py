@@ -1,10 +1,12 @@
 # bot.py - Lógica principal del bot de Telegram
 
 import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler, 
+    Application, CommandHandler, MessageHandler,
     ConversationHandler, filters, ContextTypes
 )
 from groq_client import obtener_respuesta
@@ -18,11 +20,23 @@ CONVERSANDO = 2
 # Historial por usuario (en memoria)
 historiales = {}
 
+# ── Servidor HTTP mínimo para Render ────────────────────
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is running!")
+    def log_message(self, format, *args):
+        pass
+
+def iniciar_servidor():
+    servidor = HTTPServer(("0.0.0.0", 10000), Handler)
+    servidor.serve_forever()
+
 # ── Comando /start ──────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     teclado = [["🟢 Beginner", "🟡 Medium", "🔴 Advanced"]]
     markup = ReplyKeyboardMarkup(teclado, resize_keyboard=True, one_time_keyboard=True)
-    
     await update.message.reply_text(
         "👋 Welcome to *English Practice Bot*!\n\n"
         "I'm here to help you practice English.\n"
@@ -37,7 +51,6 @@ async def elegir_nivel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = update.message.text
     user_id = update.effective_user.id
 
-    # Mapear botón → clave del nivel
     mapa = {
         "🟢 Beginner": "beginner",
         "🟡 Medium": "medium",
@@ -50,7 +63,7 @@ async def elegir_nivel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     nivel = mapa[texto]
     context.user_data["nivel"] = nivel
-    historiales[user_id] = []  # Historial limpio
+    historiales[user_id] = []
 
     mensajes_bienvenida = {
         "beginner": "🟢 Great! Let's start slow and simple.\nHello! How are you today? 😊",
@@ -72,9 +85,8 @@ async def conversar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensaje = update.message.text
     nivel = context.user_data.get("nivel", "beginner")
 
-    # Indicador de "escribiendo..."
     await context.bot.send_chat_action(
-        chat_id=update.effective_chat.id, 
+        chat_id=update.effective_chat.id,
         action="typing"
     )
 
@@ -89,10 +101,7 @@ async def conversar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cambiar_nivel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     teclado = [["🟢 Beginner", "🟡 Medium", "🔴 Advanced"]]
     markup = ReplyKeyboardMarkup(teclado, resize_keyboard=True, one_time_keyboard=True)
-    await update.message.reply_text(
-        "Choose your new level:", 
-        reply_markup=markup
-    )
+    await update.message.reply_text("Choose your new level:", reply_markup=markup)
     return ELIGIENDO_NIVEL
 
 # ── Terminar conversación ────────────────────────────────
@@ -122,7 +131,10 @@ def main():
     )
 
     app.add_handler(conv_handler)
-    
+
+    # Inicia servidor HTTP para Render
+    threading.Thread(target=iniciar_servidor, daemon=True).start()
+
     print("🤖 Bot running... Press Ctrl+C to stop")
     app.run_polling()
 
